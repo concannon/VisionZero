@@ -1,0 +1,153 @@
+---
+title: "Untitled"
+author: "Connor Concannon"
+date: "September 6, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+install.packages('e1071')
+options(scipen=1000)
+
+library(DMwR)
+library(ggplot2)
+library(dplyr)
+library(DescTools)
+library(caret)
+library(stringr)
+library(lubridate)
+
+c <- read.csv('Crashes.csv')
+str(c);names(c)
+#Desc(c,plotit=T)
+Desc(c$NUMBER.OF.PERSONS.KILLED)
+
+#Recode, dummy
+killed <- ifelse(c$NUMBER.OF.PERSONS.KILLED>0,1,0)
+times <- c %>% mutate(yr=year(DATE),
+                   mo=month(DATE),
+                   da=day(DATE),
+                   hr=hour(hm(as.character(TIME))))
+
+boro <- dummyVars(~BOROUGH,data=c)
+factor1 <- dummyVars(~CONTRIBUTING.FACTOR.VEHICLE.1,data=c)
+vehicle <- dummyVars(~VEHICLE.TYPE.CODE.1 ,data=c)
+c$ZIP.CODE <- as.character(c$ZIP.CODE)
+
+zip <- dummyVars(~ZIP.CODE,data=c)
+
+boro <-  data.frame(predict(boro,c))
+factor1 <- data.frame(predict(factor1,c))
+zip <- data.frame(predict(zip,c))
+vehicle <- data.frame(predict(vehicle,c))
+
+#bind
+c2 <- cbind(c,boro)
+c2 <- cbind(c2,factor1)
+c2 <- cbind(c2,times)
+c2 <- cbind(c2,killed)
+#c2 <- cbind(c2,zip)
+c2 <- cbind(c2,vehicle)
+
+names(c2)
+
+c2 <- c2[,-c(1:16,71:86)]
+
+c2$killed <- factor(ifelse(c2$killed==1,'Yes','No'))
+
+
+c2 <- na.omit(c2)
+
+glimpse(c2)
+names(c2)
+#Split
+c3 <- c2[sample(nrow(c2),10000),]
+c3 <- c2
+trainindex <- createDataPartition(c3$killed,p=.8,list=F)
+
+train <- c3[trainindex,]
+test <- c3[-trainindex,]
+
+
+#Model
+form <- as.formula(killed~.)
+
+
+ctrl <- trainControl(method='repeatedcv',number=5,repeats=5,classProbs = T)
+
+#rf <- train(form,data=train,method='rf',trControl=ctrl,verbose=T,mtry=10)
+#gbm <- train(form,data=train,method='gbm',trControl=ctrl,verbose=T)
+#gbm
+#plot(gbm)
+#summary(gbm)
+
+
+
+```
+
+```{r}
+
+smote <- SMOTE(form,data=train)
+glm <- train(form,data=train,method='glm')
+table(smote$killed)
+
+
+regular <- train(form,data=train,
+                       method='treebag',
+                       nbagg=50,
+                       metric='ROC',
+                       trControl=ctrl)
+
+smote_outside <- train(form,data=smote,
+                       method='treebag',
+                       nbagg=50,
+                       metric='ROC',
+                       trControl=ctrl)
+
+outside_models <- list(regular=regular,
+                       smote=smote_outside)
+
+outside_resample <- resamples(outside_models)
+
+test_roc <- function(model,data){
+  library(pROC)
+  roc_obj <- roc(data$killed,
+                 predict(model,data,type="prob")[, "Yes"],
+                 levels=c("No","Yes"))
+  ci(roc_obj)
+}
+
+
+outside_test <- lapply(outside_models,test_roc,data=test)
+outside_test <- lapply(outside_test,as.vector)
+outside_test <- do.call("rbind",outside_test)
+colnames(outside_test) <- c('lower','ROC','upper')
+outside_test <- as.data.frame(outside_test)
+
+summary(outside_resample,metric="ROC")
+
+pred <- predict(smote_outside,test,type='prob')
+
+test <- cbind(test,pred)
+
+
+
+
+glimpse(test)
+
+qplot(test$killed)
+
+varImp(smote_outside)
+
+qplot(test$hr,fill=test$killed,binwidth=1)
+
+detach('package:plyr',unload=T)
+test %>% 
+  group_by(da) %>% 
+  dplyr::summarise(num=n(),
+            Killed=sum(ifelse(killed=='Yes',1,0))) %>% 
+  mutate(perc=Killed/num) %>% 
+  ggplot(aes(x=da,y=perc))+geom_bar(stat='identity')
+
+
