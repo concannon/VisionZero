@@ -7,7 +7,7 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-install.packages('e1071')
+#install.packages('e1071')
 options(scipen=1000)
 
 library(DMwR)
@@ -74,8 +74,9 @@ test <- c3[-trainindex,]
 form <- as.formula(killed~.)
 
 
-ctrl <- trainControl(method='repeatedcv',number=5,repeats=5,classProbs = T)
+ctrl <- trainControl(classProbs = T)
 
+#method='repeatedcv',number=5,repeats=5,
 #rf <- train(form,data=train,method='rf',trControl=ctrl,verbose=T,mtry=10)
 #gbm <- train(form,data=train,method='gbm',trControl=ctrl,verbose=T)
 #gbm
@@ -88,16 +89,13 @@ ctrl <- trainControl(method='repeatedcv',number=5,repeats=5,classProbs = T)
 
 ```{r}
 
+
+
+
+
 smote <- SMOTE(form,data=train)
 glm <- train(form,data=train,method='glm')
-table(smote$killed)
 
-
-regular <- train(form,data=train,
-                       method='treebag',
-                       nbagg=50,
-                       metric='ROC',
-                       trControl=ctrl)
 
 smote_outside <- train(form,data=smote,
                        method='treebag',
@@ -105,25 +103,6 @@ smote_outside <- train(form,data=smote,
                        metric='ROC',
                        trControl=ctrl)
 
-outside_models <- list(regular=regular,
-                       smote=smote_outside)
-
-outside_resample <- resamples(outside_models)
-
-test_roc <- function(model,data){
-  library(pROC)
-  roc_obj <- roc(data$killed,
-                 predict(model,data,type="prob")[, "Yes"],
-                 levels=c("No","Yes"))
-  ci(roc_obj)
-}
-
-
-outside_test <- lapply(outside_models,test_roc,data=test)
-outside_test <- lapply(outside_test,as.vector)
-outside_test <- do.call("rbind",outside_test)
-colnames(outside_test) <- c('lower','ROC','upper')
-outside_test <- as.data.frame(outside_test)
 
 summary(outside_resample,metric="ROC")
 
@@ -136,11 +115,11 @@ test <- cbind(test,pred)
 
 glimpse(test)
 
-qplot(test$killed)
+table(test$killed)
 
 varImp(smote_outside)
 
-qplot(test$hr,fill=test$killed,binwidth=1)
+qplot(test$hr,group=test$killed,fill=test$killed,alpha=.3,geom='density')
 
 detach('package:plyr',unload=T)
 test %>% 
