@@ -8,14 +8,14 @@ output: html_document
 
 #Question 1
 ###a:  
-My initial response to the office would be that the evaluation of this pilot would be much more informative with a robust data set, and not just the pre and post test scores of the dispatchers.  That said, a simple analysis is better than nothing.  I would perform some basic descriptive statistics and a t-test.  The results show a pre-test mean of 6.8, and a post-test mean of 1.1.  This is significant and looks dramatic, but I would be hesitant about concluding anything from a small sample and very incomplete data.  
+My initial response to the office would be that the evaluation of this pilot would be much more informative with a robust data set, and not just the pre and post test scores of the dispatchers.  That said, a simple analysis is better than nothing.  I would perform some basic descriptive statistics and a t-test.  The results show a pre-test mean of 6.8, and a post-test mean of 1.1.  This is statistically significant and looks dramatic, but I would be hesitant about concluding anything from a small sample and very incomplete data.  
 
 ###b:
 I would like a data set that describes 911 calls on an individual level.  That is, I would like any variables about the caller, type of call, dispatcher, call time, and so on.  These additional variables will help in determining whether any apparent differences in the the error rate of dispatchers is due to the pilot program, random chance, or some factors present in the call-taking itself.
 
-For instance, caller gender or age may influence the operator's ability to comprehend and transcribe the address.  A caller reporting a serious crime may also be more frantic than someone with a relatively minor report for 911.  Cell phones may experience more static than land lines.  Calls late at night may involve more intoxicated people. As much data about the call itself should be requested.
+For instance, caller gender or age may influence the operator's ability to comprehend and transcribe the address.  A caller reporting a serious crime may also be more frantic than someone with a relatively minor report for 911.  Cell phones may experience more static than land lines.  Calls late at night may involve more intoxicated people. As much data about the circumstances of the call itself should be requested.
 
-Dispatcher characteristics are sure to play a role in the error rate.  Dispatcher tenure, shift, recent overtime, and the like may be informative.  A veteran dispatcher might be more attuned to callers than a rookie or overworked dispatcher.  The list goes on and on.....  
+Dispatcher characteristics are sure to play a role in the error rate.  Dispatcher tenure, shift, recent overtime, and the like may be informative.  A veteran dispatcher might be more attuned to callers than a rookie or overworked dispatcher.  The list goes on and on. 
 
 ###c:
 time frame
@@ -37,6 +37,7 @@ library(caret)
 library(stringr)
 library(lubridate)
 library(reshape2)
+library(FFTrees)
 
 
 
@@ -54,24 +55,45 @@ t.test(p$Year.0..Pre.Treatment.,p$Year.1..Post.Treatment.,paired=T)
 
 ```
 
+
+
+
+
+
+
+
+#Question 2
+###a:
+First, the fatality rate in this data set is very low.  Just 0.1% of the records in this data resulted in a fatality.  This will present issues with predictive modeling and evaluation metrics.  
+
+I also notice the distribution of vehicle #1 in the collision.  Passenger vehicles and sport utility vehicles make up the bulk of the vehicles involved, which makes sense.  Motorcyles represent less than one percent of the collisions but almost 12 percent of the fatalities.
+
+###b:
+To begin, I created dummy variables for the time of year, day, and month, as well as borough, contributing factor, and vehicle type.
+
+###c:  
+Additional data points might include speed, location, 
+
+
+
+
+
 ```{r,eval=F}
 c <- read.csv('Crashes.csv')
-str(c);names(c)
-#Desc(c,plotit=T)
-Desc(c$NUMBER.OF.PERSONS.KILLED)
+
 
 #Recode
 killed <- ifelse(c$NUMBER.OF.PERSONS.KILLED>0,1,0)
+c$ZIP.CODE <- as.character(c$ZIP.CODE)
 times <- c %>% mutate(yr=year(DATE),
                    mo=month(DATE),
                    da=day(DATE),
                    hr=hour(hm(as.character(TIME))))
 
+#Dummy
 boro <- dummyVars(~BOROUGH,data=c)
 factor1 <- dummyVars(~CONTRIBUTING.FACTOR.VEHICLE.1,data=c)
 vehicle <- dummyVars(~VEHICLE.TYPE.CODE.1 ,data=c)
-c$ZIP.CODE <- as.character(c$ZIP.CODE)
-
 zip <- dummyVars(~ZIP.CODE,data=c)
 
 boro <-  data.frame(predict(boro,c))
@@ -79,16 +101,17 @@ factor1 <- data.frame(predict(factor1,c))
 zip <- data.frame(predict(zip,c))
 vehicle <- data.frame(predict(vehicle,c))
 
-#bind
+#Bind
 c2 <- cbind(c,boro)
 c2 <- cbind(c2,factor1)
 c2 <- cbind(c2,times)
 c2 <- cbind(c2,killed)
-#c2 <- cbind(c2,zip)
 c2 <- cbind(c2,vehicle)
+```
 
-names(c2)
 
+```{r}
+#Remove non-informative
 c2 <- c2[,-c(1:16,71:86)]
 c2 <- c2 %>% select(-yr,-da)
 
@@ -97,8 +120,9 @@ c2$killed <- factor(ifelse(c2$killed==1,'Yes','No'))
 
 c2 <- na.omit(c2)
 
-glimpse(c2)
-names(c2)
+
+
+
 #Split
 c3 <- c2[sample(nrow(c2),30000),]
 c3 <- c2
@@ -113,28 +137,14 @@ form <- as.formula(killed~.)
 
 
 ctrl <- trainControl(classProbs = T)
-
-#method='repeatedcv',number=5,repeats=5,
-#rf <- train(form,data=train,method='rf',trControl=ctrl,verbose=T,mtry=10)
-#gbm <- train(form,data=train,method='gbm',trControl=ctrl,verbose=T)
-#gbm
-#plot(gbm)
-#summary(gbm)
-
-
-
 ```
 
 ```{r,eval=F}
 
 
-summary(train)
-install.packages('FFTrees')
-library(FFTrees)
 
 smote <- SMOTE(form,data=train)
 glm <- train(form,data=train,method='glm')
-gbm <- train(form,data=train,method='gbm')
 
 smote_outside <- train(form,data=smote,
                        method='treebag',
@@ -142,20 +152,16 @@ smote_outside <- train(form,data=smote,
                        metric='ROC',
                        trControl=ctrl)
 
-
 predglm <- predict(glm,test,type='prob')
-predgbm <- train(rf,test,type='prob')
 predSmote <- predict(smote_outside,test,type='prob')
 
 
 
 test$probglm <- predglm[,'Yes']
-test$probglm <- predglm[,'Yes']
 test$probSmote <- predSmote[,'Yes']
 
 
 test$predglm<- predict(glm,newdata=test,na.action=na.pass)
-
 test$predSmote <- predict(smote_outside,newdata=test,na.action=na.pass)
 
 
@@ -166,12 +172,11 @@ confusionMatrix(test$predSmote,test$killed,positive='Yes')
 
 train$killed <- as.integer(ifelse(train$killed=='Yes',1,0))
 test$killed <- as.integer(ifelse(test$killed=='Yes',1,0))
-?FFTrees
+
+
 fft <- FFTrees(formula=form,data=train,data.test=test)
-fft$cue.accuracies
 print(fft)
-names(fft)
-str(fft)
+
 plot(fft,
      decision.names=c('Not Fatal','Fatal'),)
 
