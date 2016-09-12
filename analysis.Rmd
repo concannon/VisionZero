@@ -1,7 +1,7 @@
 ---
 title: "OMAP Exercise"
 author: "Connor Concannon"
-date: "September 6, 2016"
+date: "September 11, 2016"
 output: html_document
 ---
 
@@ -18,17 +18,21 @@ For instance, caller gender or age may influence the operator's ability to compr
 Dispatcher characteristics are sure to play a role in the error rate.  Dispatcher tenure, shift, recent overtime, and the like may be informative.  A veteran dispatcher might be more attuned to callers than a rookie or overworked dispatcher.  The list goes on and on. 
 
 ###c:
-time frame
-dont tell the dispatcher
-year pre and psot
-what makes an individual call error?, not the rate
-take all these into account
-log. reg
+Ideally, the pilot program, and subsequent evaluation, would take the form of an interrupted time series design, which would make the results much more reliable.  I would prefer a year of call-level data before the pilot began, and then a year or so of call-level data after the pilot began.  If there are some dispatchers that are not subject to the pilot program, perhaps it would be beneficial to analyze their call-level data pre and post intervention as well, to determine if the pilot decreased the error rate, or if the error rate decreased overall across the agency.
 
+Depending on the nature of the pilot, it may be wise to **not** inform the dispatchers of the study.  Some bias may be introduced if the dispatchers are aware of the pilot program and the fact that the results will be thoroughly analyzed.  This may not be feasible if the pilot takes the form of increased training or something similar.
+
+As discussed above, the error rate of dispatchers is not an appropriate target measure.  There is no telling whether a decrease in errors to zero (nine members of the sample) was due to the impact of the pilot, the dispatcher no longer taking calls, on sick leave, and so on.  So the error rate may not inform stakeholders as to whether an intervention had any effect.  Rather, this evaluation should focus on the factors which increase the probability of an erroneous entry.  As discussed above, there are a number of factors that could play a role, and so the evaluation should examine these, as well as the effect of the pilot.  Once the appropriate design is in place, and the proper data collected, a multivariate analysis of dispatcher errors would be performed.  The results of this analysis will be much more useful than a simple count of error pre and post pilot.
 
 ```{r setup, include=T,eval=T,message=F,warning=F}
 
+load(".RData")
+
 options(scipen=1000)
+#install.packages('e1071')
+#install.packages('base64enc');
+#install.packages('pROC')
+#install.packages(c('DMwR','ggplot2','dplyr','DescTools','caret','stringr','lubridate','reshape2','FFTrees'))
 library(DMwR)
 library(ggplot2)
 library(dplyr)
@@ -38,12 +42,12 @@ library(stringr)
 library(lubridate)
 library(reshape2)
 library(FFTrees)
-
-
+library(DescTools)
+library(pROC)
 
 p <- read.csv('Problem1.csv')
 
-Desc(p[2:3],plotit=T)
+#Desc(p[2:3],plotit=T)
 
 
 p %>% select(-Person) %>%
@@ -66,20 +70,16 @@ t.test(p$Year.0..Pre.Treatment.,p$Year.1..Post.Treatment.,paired=T)
 ###a:
 First, the fatality rate in this data set is very low.  Just 0.1% of the records in this data resulted in a fatality.  This will present issues with predictive modeling and evaluation metrics.  
 
-I also notice the distribution of vehicle #1 in the collision.  Passenger vehicles and sport utility vehicles make up the bulk of the vehicles involved, which makes sense.  Motorcyles represent less than one percent of the collisions but almost 12 percent of the fatalities.
+I also notice the distribution of vehicle #1 in the collision.  Passenger vehicles and sport utility vehicles make up the bulk of the vehicles involved, which makes sense.  Motorcyles represent less than one percent of the collisions but almost 12 percent of the fatalities.  
 
-###b:
-To begin, I created dummy variables for the time of year, day, and month, as well as borough, contributing factor, and vehicle type.
-
-###c:  
-Additional data points might include speed, location, 
-
+The hour of the crash also seems to be useful.  Non-fatal crashed seem to dip during before 6 am, whereas many more fatal crashes occur between 12 and 5 am. 
 
 
 
 
 ```{r,eval=F}
 c <- read.csv('Crashes.csv')
+
 
 
 #Recode
@@ -96,10 +96,12 @@ factor1 <- dummyVars(~CONTRIBUTING.FACTOR.VEHICLE.1,data=c)
 vehicle <- dummyVars(~VEHICLE.TYPE.CODE.1 ,data=c)
 zip <- dummyVars(~ZIP.CODE,data=c)
 
+
 boro <-  data.frame(predict(boro,c))
 factor1 <- data.frame(predict(factor1,c))
 zip <- data.frame(predict(zip,c))
 vehicle <- data.frame(predict(vehicle,c))
+
 
 #Bind
 c2 <- cbind(c,boro)
@@ -107,12 +109,36 @@ c2 <- cbind(c2,factor1)
 c2 <- cbind(c2,times)
 c2 <- cbind(c2,killed)
 c2 <- cbind(c2,vehicle)
+rm(boro,factor1,vehicle,zip)
+
+c2 <- c2[,-c(1:16,71:86)]
+
+
+```
+
+```{r,eval=F,echo=F}
+d1 <- Desc(c2$VEHICLE.TYPE.CODE.1~c2$killed,plotit=T)
+d2 <- Desc(c2$BOROUGH~c2$killed,plotit=T)
+
+d1;d2
+
+c2 %>% 
+  #filter(killed==1) %>% 
+  ggplot(aes(x=hr,group=killed,fill=factor(killed)))+geom_density(alpha=.3)
+
+
 ```
 
 
-```{r}
+
+
+###b:
+To begin, I created dummy variables for the time of year, day, and month, as well as borough, contributing factor, and vehicle type.  I also expanded the dependent variable to include accidents with 1 or more fatalities.  I used the caret package to create training and testing partitions and first created a standard logistic regression model.  I also created a tree-based model using a sampling technique called SMOTE, which generates new data points in the minority class, in an effort to counteract the effects of the imbalanced classes.  
+
+Both models perform poorly.  Because the classes are so imbalanced, accuracy is not a useful metric in these models.  The proper evaluation metric here is sensitivity, or the 'true positive rate'.  The logistic model predicts none of the test set cases will result in a fatality, so the accuracy does not budge, and neither does the sensitivity.  The SMOTE model does predict some cases will result in a fatality, but has many more false positives.
+
+```{r,eval=F}
 #Remove non-informative
-c2 <- c2[,-c(1:16,71:86)]
 c2 <- c2 %>% select(-yr,-da)
 
 c2$killed <- factor(ifelse(c2$killed==1,'Yes','No'))
@@ -124,7 +150,7 @@ c2 <- na.omit(c2)
 
 
 #Split
-c3 <- c2[sample(nrow(c2),30000),]
+#c3 <- c2[sample(nrow(c2),30000),]
 c3 <- c2
 trainindex <- createDataPartition(c3$killed,p=.8,list=F)
 
@@ -134,42 +160,74 @@ test <- c3[-trainindex,]
 
 #Model
 form <- as.formula(killed~.)
-
-
-ctrl <- trainControl(classProbs = T)
 ```
 
-```{r,eval=F}
-
-
-
+```{r,eval=F,warning=F}
+set.seed(813)
+#models
 smote <- SMOTE(form,data=train)
 glm <- train(form,data=train,method='glm')
 
-smote_outside <- train(form,data=smote,
+smote <- train(form,data=smote,
                        method='treebag',
                        nbagg=50,
                        metric='ROC',
                        trControl=ctrl)
 
-predglm <- predict(glm,test,type='prob')
-predSmote <- predict(smote_outside,test,type='prob')
 
+#predict
+predglm <- predict(glm,test,type='prob')
+predSmote <- predict(smote,test,type='prob')
 
 
 test$probglm <- predglm[,'Yes']
 test$probSmote <- predSmote[,'Yes']
 
-
 test$predglm<- predict(glm,newdata=test,na.action=na.pass)
-test$predSmote <- predict(smote_outside,newdata=test,na.action=na.pass)
+test$predSmote <- predict(smote,newdata=test,na.action=na.pass)
 
 
 
+
+rocCurve <- roc(response=test$killed,
+                 predictor=test$probglm,
+                 levels=(levels(test$killed)))
+
+auc <- auc(rocCurve)
+roc <- data.frame(rocCurve$sensitivities,rocCurve$specificities)
+
+rocCurveSmote <- roc(response=test$killed,
+                     predictor=test$probSmote,
+                     levels=levels(test$killed))
+aucSmote <- auc(rocCurveSmote)
+rocSmote <- data.frame(rocCurveSmote$sensitivities,rocCurveSmote$specificities)
+```
+
+
+
+```{r,eval=T}
+#confusion matrix
 confusionMatrix(test$predglm,test$killed,positive='Yes')
 confusionMatrix(test$predSmote,test$killed,positive='Yes')
 
+#ROC curves
+ggplot(roc,
+       aes(x=1-rocCurve.specificities,y=rocCurve.sensitivities))+geom_line(color='red')+
+  geom_text(aes(x=.75,y=.75,label=paste("AUC:",round(auc[1],3))),color='red')+
+  geom_line(data=rocSmote,aes(x=1-rocCurveSmote.sensitivities,y= rocCurveSmote.specificities),color='green')+
+  geom_text(aes(x=.75,y=.65,label=paste("AUC:",round(aucSmote[1],3))),color='green')+
+  theme_minimal()+theme(legend.position='none')
 
+```
+
+I also created a quick model using an R package called [Fast and Frugal Trees](https://cran.rstudio.com/web/packages/FFTrees/index.html).  This package favors simple heuristics over complex models.  This technique settles on four predictors: passenger vehicles, hour of the day, and disregarded traffic signal.  This model has a higher sensitivity than the SMOTE or logistic model, and is much easier to interpret.  The variable importance metrics for the logistic and SMOTE models also show similar importance values for vehicle type and hour of day.  
+
+These findings largely make sense.  Most accidents are not fatal, and involve standard passenger vehicles.  A large chunk of the data is predicted not to be fatal in light of this fact.  If it does not involve a passenger vehicle, and is before 7 am, then the odds of a fatal accident increase slightly.  Similarly, in some model iterations, if the vehicle is a motorcycle, the odds of a fatality increase.  In light of these findings, increased scrutiny of unsafe drivers in the early morning hours or motorcycle riders may be appropriate.
+
+```{r TREE,warning=F,echo=T,eval=F}
+
+train <- c3[trainindex,]
+test <- c3[-trainindex,]
 train$killed <- as.integer(ifelse(train$killed=='Yes',1,0))
 test$killed <- as.integer(ifelse(test$killed=='Yes',1,0))
 
@@ -177,57 +235,32 @@ test$killed <- as.integer(ifelse(test$killed=='Yes',1,0))
 fft <- FFTrees(formula=form,data=train,data.test=test)
 print(fft)
 
+```
+
+```{r,eval=T}
 plot(fft,
-     decision.names=c('Not Fatal','Fatal'),)
+     decision.names=c('Not Fatal','Fatal'))
 
-test$Class <- predict(model,newdata=test,na.action=na.pass)
-
-confusionMatrix(predictions,test$over180,positive="Yes") #acc. 78; sens. .07, spec. .97
-table(c3$over180)
-
-rocCurve <- roc(response=test$over180,
-                 predictor=test$Prob,
-                 levels=(levels(test$over180)))
-
-auc <- auc(rocCurve)
-roc <- data.frame(rocCurve$sensitivities,rocCurve$specificities)
-head(roc)
-ggplot(roc,
-       aes(x=1-rocCurve.specificities,y=rocCurve.sensitivities))+geom_line(color='red')+
-  geom_text(aes(x=.75,y=.75,color='grey',label=paste("AUC:",round(auc[1],3))))+theme_minimal()+theme(legend.position='none')
-
-
-
-
-
-
-
-
-
-
-
-
-
+#save.image()
 
 
 ```
 
+###c:  
+Additional data points might include driver history, speed, location, and passenger information.  This model is difficult to evaluate given the very low rate of fatal accidents.  Future research might also expand the outcome variable to include accidents with serious physical injury as well as death, to both boost the performance metrics, but also learn about the factors that contribute to accidents.  Including serious injury might also have the effect of 'including' cases that would have been fatal if not for immediate medical care.  
 
-```
-glimpse(test)
+Future iterations might also create an interaction term between vehicle type 1 and 2.  Combinations such as truck vs. bicycle could unfortunately provide some performance gains.  
 
-table(test$killed)
+Location based metrics might also be useful.  For example, the number of previous crashes (fatal and non fatal) in the same area could highlight dangerous intersections and stretches.
 
-varImp(smote_outside)
 
-qplot(test$hr,group=test$killed,fill=test$killed,alpha=.3,geom='density')
 
-detach('package:plyr',unload=T)
-test %>% 
-  group_by(da) %>% 
-  dplyr::summarise(num=n(),
-            Killed=sum(ifelse(killed=='Yes',1,0))) %>% 
-  mutate(perc=Killed/num) %>% 
-  ggplot(aes(x=da,y=perc))+geom_bar(stat='identity')
-```
+
+
+
+
+
+
+
+
 
